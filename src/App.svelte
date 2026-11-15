@@ -1,7 +1,5 @@
 <script lang="ts">
 	import { MediaQuery } from "svelte/reactivity";
-	import { innerHeight } from "svelte/reactivity/window";
-	import { Drawer } from "vaul-svelte";
 	import MapView, { type Selection } from "./lib/MapView.svelte";
 	import { mapillaryEnabled, photoUrl } from "./lib/mapillary";
 	import { BINS_MINZOOM, BIN_CLASSES, MAPILLARY_COLOR, STALE_BEFORE, type BinClass, type Theme } from "./lib/style";
@@ -67,21 +65,82 @@
 	}
 
 	// Phones get a sheet over the map that rests showing its top part (title,
-	// hint, selection) and snaps open for the settings; wider screens a sidebar.
+	// hint, selection) and is dragged or tapped open for the settings; wider
+	// screens a sidebar. The sheet is as tall as the screen and moves by its
+	// offset: how much of it is pushed below the bottom edge.
 	const wide = new MediaQuery("min-width: 768px");
+	let sheet = $state<HTMLElement>();
+	let more = $state<HTMLElement>();
+	let sheetHeight = $state(0);
 	let peekHeight = $state(0);
 	let settingsHeight = $state(0);
 	let safeArea = $state(0);
 	const peek = $derived(peekHeight + safeArea);
-	// Open, the sheet fits its content, or fills the screen and scrolls if
-	// that is too tall.
-	const snapPoints = $derived.by(() => {
-		const full = peekHeight + settingsHeight;
-		return [`${peek}px`, full < (innerHeight.current ?? 0) * 0.9 ? `${full}px` : 1];
+	// Open, the sheet fits its content; content about as tall as the screen
+	// fills it instead, and scrolls only if it does not fit.
+	const content = $derived(peekHeight + settingsHeight);
+	const fills = $derived(content > sheetHeight * 0.9);
+	const scrolls = $derived(content > sheetHeight);
+	const restOffset = $derived(sheetHeight - peek);
+	const openOffset = $derived(fills ? 0 : sheetHeight - content);
+	let dragOffset = $state<number | null>(null);
+	const offset = $derived(dragOffset ?? (expanded ? openOffset : restOffset));
+
+	$effect(() => {
+		if (!expanded) more?.scrollTo({ top: 0, behavior: "smooth" });
 	});
 
+	// Past either end the sheet still gives, less the further it is pulled.
+	const rubberBand = (distance: number, limit = 120) => limit * (1 - 1 / ((distance * 0.55) / limit + 1));
+	function resist(raw: number) {
+		if (raw < openOffset) return openOffset - rubberBand(openOffset - raw);
+		if (raw > restOffset) return restOffset + rubberBand(raw - restOffset);
+		return raw;
+	}
+
+	let drag: { id: number; startY: number; startOffset: number; raw: number; moved: boolean; y: number; time: number; velocity: number } | undefined;
 	// A drag can end in a click on whatever it started on, which must not count.
 	let dragged = false;
+
+	function press(e: PointerEvent) {
+		dragged = false;
+		if (!sheet || !e.isPrimary || e.button !== 0) return;
+		// Settings that scroll are scrolled, and the sheet moved by its top part.
+		if (expanded && scrolls && (e.target as Element).closest(".more")) return;
+		// Read from the screen, so a sheet can be caught mid-animation.
+		const { m42 } = new DOMMatrix(getComputedStyle(sheet).transform);
+		drag = { id: e.pointerId, startY: e.clientY, startOffset: m42, raw: m42, moved: false, y: e.clientY, time: e.timeStamp, velocity: 0 };
+	}
+
+	function move(e: PointerEvent) {
+		if (!sheet || e.pointerId !== drag?.id) return;
+		const dy = e.clientY - drag.startY;
+		if (!drag.moved) {
+			// Small wobbles are still taps.
+			if (Math.abs(dy) < 6) return;
+			drag.moved = true;
+			sheet.setPointerCapture(e.pointerId);
+		}
+		drag.velocity = (e.clientY - drag.y) / Math.max(1, e.timeStamp - drag.time);
+		drag.y = e.clientY;
+		drag.time = e.timeStamp;
+		drag.raw = drag.startOffset + dy;
+		dragOffset = resist(drag.raw);
+	}
+
+	function release(e: PointerEvent) {
+		if (e.pointerId !== drag?.id) return;
+		if (drag.moved) {
+			// A flick goes where it points; otherwise the sheet settles at the
+			// closer end.
+			const velocity = e.timeStamp - drag.time < 100 ? drag.velocity : 0;
+			expanded = Math.abs(velocity) > 0.4 ? velocity < 0 : drag.raw < (openOffset + restOffset) / 2;
+			dragged = true;
+		}
+		drag = undefined;
+		dragOffset = null;
+	}
+
 	function dropClick(e: MouseEvent) {
 		if (!dragged) return;
 		dragged = false;
@@ -189,35 +248,30 @@
 			<div class="settings">{@render settings()}</div>
 		</aside>
 	{:else}
-		<!-- Always open and non-modal: the map behind stays usable. -->
-		<Drawer.Root
-			open
-			modal={false}
-			dismissible={false}
-			noBodyStyles
-			{snapPoints}
-			bind:activeSnapPoint={() => snapPoints[expanded ? 1 : 0], (point) => (expanded = snapPoints.indexOf(point ?? "") > 0)}
-			onDrag={() => (dragged = true)}
+		<aside
+			class="sheet"
+			class:expanded
+			class:dragging={dragOffset !== null}
+			aria-label="BinRadar"
+			style:transform={sheetHeight ? `translate3d(0, ${offset}px, 0)` : undefined}
+			bind:this={sheet}
+			bind:offsetHeight={sheetHeight}
+			onpointerdown={press}
+			onpointermove={move}
+			onpointerup={release}
+			onpointercancel={release}
+			onclickcapture={dropClick}
 		>
-			<Drawer.Content
-				class="sheet"
-				aria-label="BinRadar"
-				trapFocus={false}
-				onEscapeKeydown={(e) => e.preventDefault()}
-				onpointerdown={() => (dragged = false)}
-				onclickcapture={dropClick}
-			>
-				<div class="peek" bind:offsetHeight={peekHeight}>
-					<button class="handle" onclick={() => (expanded = !expanded)} aria-expanded={expanded} aria-label="Toggle settings">
-						<span></span>
-					</button>
-					{@render top()}
-				</div>
-				<div class="more" class:collapsed={!expanded} class:scrolls={snapPoints[1] === 1} inert={!expanded}>
-					<div class="settings" bind:offsetHeight={settingsHeight}>{@render settings()}</div>
-				</div>
-			</Drawer.Content>
-		</Drawer.Root>
+			<div class="peek" bind:offsetHeight={peekHeight}>
+				<button class="handle" onclick={() => (expanded = !expanded)} aria-expanded={expanded} aria-label="Toggle settings">
+					<span></span>
+				</button>
+				{@render top()}
+			</div>
+			<div class="more" class:scrolls bind:this={more} inert={!expanded}>
+				<div class="settings" bind:offsetHeight={settingsHeight}>{@render settings()}</div>
+			</div>
+		</aside>
 	{/if}
 
 	<!-- Measures the strip the home indicator covers, which the resting sheet must clear. -->
@@ -255,8 +309,8 @@
 		border-right: 1px solid var(--border);
 	}
 
-	/* Phones: a full-height sheet that vaul slides to its snap points. */
-	.app :global(.sheet) {
+	/* Phones: a full-height sheet, moved by transform. */
+	.sheet {
 		position: fixed;
 		inset: auto 0 0;
 		z-index: 10;
@@ -268,25 +322,42 @@
 		box-shadow:
 			0 0 0 1px var(--border),
 			0 -2px 14px rgb(0 0 0 / 0.15);
-		outline: none;
+		transform: translate3d(0, 100%, 0);
+		transition: transform 0.5s cubic-bezier(0.32, 0.72, 0, 1);
+		touch-action: none;
+		will-change: transform;
+	}
+	/* Fills the gap below a sheet pulled up past the top of the screen. */
+	.sheet::after {
+		content: "";
+		position: absolute;
+		inset: 100% 0 auto;
+		height: 100%;
+		background: inherit;
+	}
+	.sheet.dragging {
+		transition: none;
 	}
 	.peek {
 		padding: 4px 16px 16px;
+		-webkit-user-select: none;
+		user-select: none;
 	}
 	.more {
 		transition: opacity 0.2s;
+	}
+	.sheet:not(.expanded, .dragging) .more {
+		opacity: 0;
 	}
 	.more.scrolls {
 		flex: 1;
 		min-height: 0;
 		overflow-y: auto;
 		overscroll-behavior: contain;
+		touch-action: pan-y;
 	}
 	.more .settings {
 		padding: 0 16px calc(16px + env(safe-area-inset-bottom));
-	}
-	:global(.sheet:not(.vaul-dragging)) .collapsed {
-		opacity: 0;
 	}
 	.settings > :global(section:first-child) {
 		margin-top: 0;

@@ -10,9 +10,7 @@
 		"check": "svelte-check --tsconfig ./tsconfig.json"
 	},
 	"dependencies": {
-		"bits-ui": "^1.8.0",
-		"maplibre-gl": "^6.16.0",
-		"vaul-svelte": "^1.0.0-next.7"
+		"maplibre-gl": "^6.16.0"
 	},
 	"devDependencies": {
 		"@sveltejs/vite-plugin-svelte": "^7.3.1",
