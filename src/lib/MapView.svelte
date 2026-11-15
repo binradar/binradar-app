@@ -23,11 +23,13 @@
 		mapillary: boolean;
 		mapillaryData: GeoJSON.FeatureCollection;
 		selection: Selection | null;
+		// Height at the bottom that UI over the map covers.
+		inset: number;
 		onselect: (selection: Selection | null) => void;
 		onview: (view: View) => void;
 	}
 
-	let { theme, bins, mapillary, mapillaryData, selection, onselect, onview }: Props = $props();
+	let { theme, bins, mapillary, mapillaryData, selection, inset, onselect, onview }: Props = $props();
 
 	const VIEW_KEY = "binradar:view";
 	const LAYERS = ["bins", "mapillary"];
@@ -122,13 +124,26 @@
 		const data = selectedData();
 		map?.getSource<GeoJSONSource>("selected")?.setData(data);
 	});
+	// Brings a selection the covered strip would hide into view.
+	$effect(() => {
+		const point = selection?.lngLat;
+		const bottom = container.clientHeight - inset;
+		if (!map || !point) return;
+		const { y } = map.project(point);
+		if (y > bottom - 24) map.panBy([0, y - bottom / 2]);
+	});
 </script>
 
-<div class="map" bind:this={container}></div>
+<div class="map" bind:this={container} style:--inset="{inset}px"></div>
 
 <style>
 	.map {
 		position: absolute;
 		inset: 0;
+	}
+	.map :global(.maplibregl-ctrl-bottom-left),
+	.map :global(.maplibregl-ctrl-bottom-right) {
+		bottom: var(--inset);
+		transition: bottom 0.3s;
 	}
 </style>
