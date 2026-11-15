@@ -2,6 +2,7 @@
 	import { MediaQuery } from "svelte/reactivity";
 	import MapView, { type Selection } from "./lib/MapView.svelte";
 	import { findPhoto, mapillaryEnabled, viewerUrl } from "./lib/mapillary";
+	import { directionsLinks } from "./lib/directions";
 	import { findPhotos, streetLevelLinks, type Photos } from "./lib/streetLevel";
 	import { BINS_MINZOOM, BIN_CLASSES, MAPILLARY_COLOR, STALE_BEFORE, type BinClass, type Theme } from "./lib/style";
 
@@ -57,10 +58,29 @@
 	const binClass = $derived(
 		selection?.kind === "bin" ? (BIN_CLASSES[selection.properties.class as BinClass] ?? BIN_CLASSES.waste_basket) : undefined,
 	);
-	const directions = $derived(
-		selection &&
-			`https://www.openstreetmap.org/directions?engine=fossgis_osrm_foot&route=%3B${selection.lngLat[1]}%2C${selection.lngLat[0]}`,
-	);
+	// Where a bin=yes bin is, from the object it was tagged on (the tiles'
+	// list in process.lua): "highway=bus_stop" reads "At bus stop
+	// Alexanderplatz". The name in the tiles is that object's.
+	const HOST_LABELS: Record<string, string> = {
+		"highway=bus_stop": "bus stop",
+		"railway=tram_stop": "tram stop",
+		"highway=platform": "stop",
+		"public_transport=platform": "stop",
+		"public_transport=stop_position": "stop",
+		"vending=excrement_bags": "dog waste bag dispenser",
+		"amenity=shelter": "shelter",
+		"amenity=bench": "bench",
+		"amenity=parking": "car park",
+		"highway=street_lamp": "street lamp",
+	};
+	const host = $derived.by(() => {
+		const tag = selection?.kind === "bin" ? selection.properties.host : undefined;
+		if (typeof tag !== "string") return undefined;
+		const label = HOST_LABELS[tag] ?? tag.slice(tag.indexOf("=") + 1).replaceAll("_", " ");
+		const name = selection?.properties.name;
+		return name ? `At ${label} ${name}` : `At ${/^[aeiou]/.test(label) ? "an" : "a"} ${label}`;
+	});
+	const directions = $derived(selection ? directionsLinks(selection.lngLat) : []);
 	// Likewise the street-level links, as each service names a photo nearby.
 	let nearby = $state<Photos>({});
 	$effect(() => {
@@ -178,6 +198,15 @@
 	}
 </script>
 
+{#snippet linkGroup(title: string, links: { label: string; url: string }[])}
+	<p class="group muted">{title}</p>
+	<p class="links">
+		{#each links as { label, url } (label)}
+			<a href={url} target="_blank" rel="noopener">{label}</a>
+		{/each}
+	</p>
+{/snippet}
+
 {#snippet top()}
 	<header>
 		<h1>BinRadar</h1>
@@ -193,7 +222,11 @@
 			<button class="close" onclick={() => (selection = null)} aria-label="Close">×</button>
 			{#if selection.kind === "bin" && binClass}
 				<h2><span class="dot" style:background={binClass.color}></span>{binClass.label}</h2>
-				{#if selection.properties.name}<p>{selection.properties.name}</p>{/if}
+				{#if host}
+					<p>{host}</p>
+				{:else if selection.properties.name}
+					<p>{selection.properties.name}</p>
+				{/if}
 				{#if selection.properties.waste}<p>Accepts: {String(selection.properties.waste).replaceAll(";", ", ")}</p>{/if}
 				{#if selection.properties.recycling}
 					<p>Accepts: {String(selection.properties.recycling).replaceAll(";", ", ").replaceAll("_", " ")}</p>
@@ -203,8 +236,9 @@
 				{#if selection.properties.operator}<p class="muted">Operated by {selection.properties.operator}</p>{/if}
 				{#if selection.properties.precision === "low"}<p class="muted">Only tagged as bin=yes in OpenStreetMap.</p>{/if}
 				<p class="links">
-					<a href={directions} target="_blank" rel="noopener">Directions</a>
-					<a href="https://www.openstreetmap.org/node/{selection.properties.id}" target="_blank" rel="noopener">OpenStreetMap</a>
+					<a href="https://www.openstreetmap.org/node/{selection.properties.id}" target="_blank" rel="noopener">
+						View on OpenStreetMap
+					</a>
 				</p>
 			{:else if selection.kind === "mapillary"}
 				<h2><span class="dot ring" style:border-color={MAPILLARY_COLOR}></span>Trash can on Mapillary</h2>
@@ -212,21 +246,13 @@
 				<p class:stale={Number(selection.properties.last_seen_at) < STALE_BEFORE}>
 					Last seen {formatDate(selection.properties.last_seen_at)}
 				</p>
-				<p class="links">
-					<a href={directions} target="_blank" rel="noopener">Directions</a>
-					<a href={viewer} target="_blank" rel="noopener">View on Mapillary</a>
-				</p>
+				<p class="links"><a href={viewer} target="_blank" rel="noopener">View on Mapillary</a></p>
 			{:else}
 				<h2>Selected spot</h2>
 				<p class="muted">{selection.lngLat[1].toFixed(5)}, {selection.lngLat[0].toFixed(5)}</p>
-				<p class="links"><a href={directions} target="_blank" rel="noopener">Directions</a></p>
 			{/if}
-			<p class="street muted">Street-level photos</p>
-			<p class="links">
-				{#each streetLevel as { label, url } (label)}
-					<a href={url} target="_blank" rel="noopener">{label}</a>
-				{/each}
-			</p>
+			{@render linkGroup("Directions", directions)}
+			{@render linkGroup("Street-level photos", streetLevel)}
 		</section>
 	{/if}
 {/snippet}
@@ -476,11 +502,11 @@
 		gap: 4px 16px;
 		margin-top: 8px;
 	}
-	.street {
+	.group {
 		margin-top: 12px;
 		font-size: 0.85rem;
 	}
-	.street + .links {
+	.group + .links {
 		margin-top: 2px;
 	}
 	.muted,
