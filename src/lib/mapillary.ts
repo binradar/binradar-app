@@ -12,17 +12,25 @@ export const mapillaryEnabled = TOKEN !== "";
 export const MAPILLARY_TILES = `https://tiles.mapillary.com/maps/vtp/mly_map_feature_point/2/{z}/{x}/{y}?access_token=${encodeURIComponent(TOKEN)}`;
 export const MAPILLARY_ZOOM = 14;
 
-// Links to a photo the detection was made in, or to its location if the
-// lookup fails.
-export async function photoUrl(id: string, [lng, lat]: [number, number]): Promise<string> {
-	const fallback = `https://www.mapillary.com/app/?lat=${lat}&lng=${lng}&z=19`;
+// Opens Mapillary's viewer with only trash can detections shown: in a photo
+// of the detection with it selected, or, without a photo, on the map there.
+export function viewerUrl(id: string, [lng, lat]: [number, number], photo?: string): string {
+	const params = new URLSearchParams(photo ? { pKey: photo, focus: "photo", mapFeatureKey: id } : { focus: "map" });
+	params.set("lat", String(lat));
+	params.set("lng", String(lng));
+	params.set("z", "17");
+	params.set("mapFeature[]", "object--trash-can");
+	return `https://www.mapillary.com/app/?${params}`;
+}
+
+// A photo the detection was made in, if Mapillary answers.
+export async function findPhoto(id: string): Promise<string | undefined> {
 	try {
 		const params = new URLSearchParams({ access_token: TOKEN, fields: "images" });
 		const response = await fetch(`${API}/${id}?${params}`);
 		const { images } = (await response.json()) as { images?: { data: { id: string }[] } };
-		const image = images?.data[0];
-		return image ? `https://www.mapillary.com/app/?pKey=${image.id}&focus=photo` : fallback;
+		return images?.data[0]?.id;
 	} catch {
-		return fallback;
+		return undefined;
 	}
 }

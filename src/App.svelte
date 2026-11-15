@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { MediaQuery } from "svelte/reactivity";
 	import MapView, { type Selection } from "./lib/MapView.svelte";
-	import { mapillaryEnabled, photoUrl } from "./lib/mapillary";
+	import { findPhoto, mapillaryEnabled, viewerUrl } from "./lib/mapillary";
 	import { BINS_MINZOOM, BIN_CLASSES, MAPILLARY_COLOR, STALE_BEFORE, type BinClass, type Theme } from "./lib/style";
 
 	type ThemeSetting = "auto" | Theme;
@@ -39,15 +39,19 @@
 	let selection = $state.raw<Selection | null>(null);
 	let expanded = $state(false);
 
+	// The viewer link shows right away and gains the photo once Mapillary names one.
 	let photo = $state<string>();
 	$effect(() => {
 		photo = undefined;
 		if (selection?.kind !== "mapillary") return;
 		const current = selection;
-		photoUrl(String(current.properties.id), current.lngLat).then((url) => {
-			if (selection === current) photo = url;
+		findPhoto(String(current.properties.id)).then((id) => {
+			if (selection === current) photo = id;
 		});
 	});
+	const viewer = $derived(
+		selection?.kind === "mapillary" ? viewerUrl(String(selection.properties.id), selection.lngLat, photo) : undefined,
+	);
 
 	const binClass = $derived(
 		selection?.kind === "bin" ? (BIN_CLASSES[selection.properties.class as BinClass] ?? BIN_CLASSES.waste_basket) : undefined,
@@ -185,7 +189,7 @@
 				</p>
 				<p class="links">
 					<a href={directions} target="_blank" rel="noopener">Directions</a>
-					{#if photo}<a href={photo} target="_blank" rel="noopener">Photo on Mapillary</a>{/if}
+					<a href={viewer} target="_blank" rel="noopener">View on Mapillary</a>
 				</p>
 			{/if}
 		</section>
