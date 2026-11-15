@@ -68,6 +68,12 @@
 		expanded = false;
 	}
 
+	function zoomed(z: number) {
+		zoom = z;
+		// Zoomed out too far to see bins, none stays selected.
+		if (z < BINS_MINZOOM) selection = null;
+	}
+
 	// Phones get a sheet over the map that rests showing its top part (title,
 	// hint, selection) and is dragged or tapped open for the settings; wider
 	// screens a sidebar. The sheet is as tall as the screen and moves by its
@@ -242,7 +248,7 @@
 			{selection}
 			inset={wide.current ? 0 : peek}
 			onselect={select}
-			onzoom={(z) => (zoom = z)}
+			onzoom={zoomed}
 		/>
 	</main>
 
