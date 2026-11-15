@@ -82,6 +82,29 @@
 			m.on("mouseleave", id, () => (m.getCanvas().style.cursor = ""));
 		}
 
+		// MapLibre zooms on any scroll. A trackpad's two-finger swipe moves the
+		// map instead, as in Apple Maps; a pinch (sent as a scroll with Ctrl
+		// held) and a mouse wheel still zoom. Trackpads scroll in fine steps,
+		// where browsers report wheelDeltaY as -3 × deltaY, mouse wheels in
+		// notches of 120. Once a swipe is recognised, its momentum stays a swipe.
+		let swipeUntil = 0;
+		container.addEventListener(
+			"wheel",
+			(e) => {
+				if (e.ctrlKey || e.deltaMode !== WheelEvent.DOM_DELTA_PIXEL) return;
+				const { wheelDeltaY } = e as WheelEvent & { wheelDeltaY?: number };
+				const trackpad = e.deltaX !== 0 || wheelDeltaY === -3 * e.deltaY;
+				if (!trackpad && e.timeStamp > swipeUntil) return;
+				swipeUntil = e.timeStamp + 200;
+				// Before MapLibre's own listener further in, and instead of the
+				// browser's back/forward swipe.
+				e.preventDefault();
+				e.stopPropagation();
+				m.panBy([e.deltaX, e.deltaY], { animate: false });
+			},
+			{ capture: true, passive: false },
+		);
+
 		map = m;
 		return () => m.remove();
 	});
