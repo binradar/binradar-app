@@ -2,6 +2,7 @@
 	import { MediaQuery } from "svelte/reactivity";
 	import MapView, { type Selection } from "./lib/MapView.svelte";
 	import { findPhoto, mapillaryEnabled, viewerUrl } from "./lib/mapillary";
+	import { streetLevelLinks } from "./lib/streetLevel";
 	import { BINS_MINZOOM, BIN_CLASSES, MAPILLARY_COLOR, STALE_BEFORE, type BinClass, type Theme } from "./lib/style";
 
 	type ThemeSetting = "auto" | Theme;
@@ -60,6 +61,12 @@
 		selection &&
 			`https://www.openstreetmap.org/directions?engine=fossgis_osrm_foot&route=%3B${selection.lngLat[1]}%2C${selection.lngLat[0]}`,
 	);
+	const streetLevel = $derived.by(() => {
+		if (!selection) return [];
+		const links = streetLevelLinks(selection.lngLat);
+		// Detections link the Mapillary photo they were made in already.
+		return selection.kind === "mapillary" ? links.filter(({ label }) => label !== "Mapillary") : links;
+	});
 	const formatDate = (ms: unknown) => new Date(Number(ms)).toLocaleDateString("en", { year: "numeric", month: "long" });
 
 	function select(next: Selection | null) {
@@ -70,8 +77,9 @@
 
 	function zoomed(z: number) {
 		zoom = z;
-		// Zoomed out too far to see bins, none stays selected.
-		if (z < BINS_MINZOOM) selection = null;
+		// Zoomed out too far to see bins, none stays selected. A picked spot
+		// does not depend on them.
+		if (z < BINS_MINZOOM && selection?.kind !== "place") selection = null;
 	}
 
 	// Phones get a sheet over the map that rests showing its top part (title,
@@ -187,7 +195,7 @@
 					<a href={directions} target="_blank" rel="noopener">Directions</a>
 					<a href="https://www.openstreetmap.org/node/{selection.properties.id}" target="_blank" rel="noopener">OpenStreetMap</a>
 				</p>
-			{:else}
+			{:else if selection.kind === "mapillary"}
 				<h2><span class="dot ring" style:border-color={MAPILLARY_COLOR}></span>Trash can on Mapillary</h2>
 				<p>Detected in street-level photos, not confirmed in OpenStreetMap.</p>
 				<p class:stale={Number(selection.properties.last_seen_at) < STALE_BEFORE}>
@@ -197,7 +205,17 @@
 					<a href={directions} target="_blank" rel="noopener">Directions</a>
 					<a href={viewer} target="_blank" rel="noopener">View on Mapillary</a>
 				</p>
+			{:else}
+				<h2>Selected spot</h2>
+				<p class="muted">{selection.lngLat[1].toFixed(5)}, {selection.lngLat[0].toFixed(5)}</p>
+				<p class="links"><a href={directions} target="_blank" rel="noopener">Directions</a></p>
 			{/if}
+			<p class="street muted">Street-level photos</p>
+			<p class="links">
+				{#each streetLevel as { label, url } (label)}
+					<a href={url} target="_blank" rel="noopener">{label}</a>
+				{/each}
+			</p>
 		</section>
 	{/if}
 {/snippet}
@@ -225,6 +243,11 @@
 			{/each}
 			<li><span class="dot ring" style:border-color={MAPILLARY_COLOR}></span>Mapillary detection</li>
 		</ul>
+	</section>
+
+	<section>
+		<h2>Street-level photos</h2>
+		<p class="muted">Right-click or long-press the map to see street-level photos of any spot.</p>
 	</section>
 
 	<section>
@@ -438,8 +461,16 @@
 	}
 	.links {
 		display: flex;
-		gap: 16px;
+		flex-wrap: wrap;
+		gap: 4px 16px;
 		margin-top: 8px;
+	}
+	.street {
+		margin-top: 12px;
+		font-size: 0.85rem;
+	}
+	.street + .links {
+		margin-top: 2px;
 	}
 	.muted,
 	.disabled {

@@ -1,13 +1,22 @@
 <script lang="ts" module>
 	export interface Selection {
-		kind: "bin" | "mapillary";
+		// A place is any spot picked by a right click or long press.
+		kind: "bin" | "mapillary" | "place";
 		lngLat: [number, number];
 		properties: Record<string, unknown>;
 	}
 </script>
 
 <script lang="ts">
-	import { GeolocateControl, Map, NavigationControl, setWorkerUrl, type GeoJSONSource } from "maplibre-gl";
+	import {
+		GeolocateControl,
+		Map,
+		NavigationControl,
+		setWorkerUrl,
+		type GeoJSONSource,
+		type LngLat,
+		type MapTouchEvent,
+	} from "maplibre-gl";
 	import workerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?url";
 	import "maplibre-gl/dist/maplibre-gl.css";
 	import { onMount, untrack } from "svelte";
@@ -63,6 +72,8 @@
 		m.on("load", () => emitView(m));
 		m.on("moveend", () => emitView(m));
 		m.on("click", (e) => {
+			// The tap that ends a long press must not undo it.
+			if (held) return;
 			const { x, y } = e.point;
 			const layers = LAYERS.filter((id) => m.getLayer(id));
 			// A few pixels of slack, so bins are easy to hit with a finger.
@@ -80,6 +91,46 @@
 		for (const id of LAYERS) {
 			m.on("mouseenter", id, () => (m.getCanvas().style.cursor = "pointer"));
 			m.on("mouseleave", id, () => (m.getCanvas().style.cursor = ""));
+		}
+
+		// A right click or a long press picks the spot under it, to look at in
+		// street-level photos. Safari on iOS sends no contextmenu for a long
+		// press, so touches time their own; Chrome on Android sends both.
+		let touch: { start: MapTouchEvent["point"]; timer: ReturnType<typeof setTimeout> } | undefined;
+		let held = false;
+		const pick = (lngLat: LngLat) => onselect({ kind: "place", lngLat: lngLat.toArray(), properties: {} });
+		const cancel = () => {
+			clearTimeout(touch?.timer);
+			touch = undefined;
+		};
+		m.on("contextmenu", (e) => {
+			e.originalEvent.preventDefault();
+			if (held) return;
+			if (touch) held = true;
+			cancel();
+			pick(e.lngLat);
+		});
+		m.on("touchstart", (e) => {
+			cancel();
+			held = false;
+			// A second finger starts a pinch.
+			if (e.originalEvent.touches.length !== 1) return;
+			const timer = setTimeout(() => {
+				held = true;
+				cancel();
+				pick(e.lngLat);
+			}, 500);
+			touch = { start: e.point, timer };
+		});
+		m.on("touchmove", (e) => {
+			if (touch && e.point.dist(touch.start) > 10) cancel();
+		});
+		for (const type of ["touchend", "touchcancel"] as const) {
+			m.on(type, () => {
+				cancel();
+				// Long enough for the click the browser may still send.
+				if (held) setTimeout(() => (held = false), 400);
+			});
 		}
 
 		map = m;
@@ -126,6 +177,10 @@
 	.map {
 		position: absolute;
 		inset: 0;
+		/* No text selection or callout on iOS during a long press. */
+		-webkit-touch-callout: none;
+		-webkit-user-select: none;
+		user-select: none;
 	}
 	.map :global(.maplibregl-ctrl-bottom-left),
 	.map :global(.maplibregl-ctrl-bottom-right) {
