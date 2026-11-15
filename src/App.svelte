@@ -2,7 +2,7 @@
 	import { MediaQuery } from "svelte/reactivity";
 	import MapView, { type Selection } from "./lib/MapView.svelte";
 	import { findPhoto, mapillaryEnabled, viewerUrl } from "./lib/mapillary";
-	import { streetLevelLinks } from "./lib/streetLevel";
+	import { findPhotos, streetLevelLinks, type Photos } from "./lib/streetLevel";
 	import { BINS_MINZOOM, BIN_CLASSES, MAPILLARY_COLOR, STALE_BEFORE, type BinClass, type Theme } from "./lib/style";
 
 	type ThemeSetting = "auto" | Theme;
@@ -61,9 +61,20 @@
 		selection &&
 			`https://www.openstreetmap.org/directions?engine=fossgis_osrm_foot&route=%3B${selection.lngLat[1]}%2C${selection.lngLat[0]}`,
 	);
+	// Likewise the street-level links, as each service names a photo nearby.
+	let nearby = $state<Photos>({});
+	$effect(() => {
+		nearby = {};
+		if (!selection) return;
+		const current = selection;
+		const found = (photos: Photos) => {
+			if (selection === current) nearby = { ...nearby, ...photos };
+		};
+		findPhotos(current.lngLat, found, { mapillary: current.kind !== "mapillary" });
+	});
 	const streetLevel = $derived.by(() => {
 		if (!selection) return [];
-		const links = streetLevelLinks(selection.lngLat);
+		const links = streetLevelLinks(selection.lngLat, nearby);
 		// Detections link the Mapillary photo they were made in already.
 		return selection.kind === "mapillary" ? links.filter(({ label }) => label !== "Mapillary") : links;
 	});

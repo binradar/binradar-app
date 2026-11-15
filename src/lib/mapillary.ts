@@ -23,6 +23,30 @@ export function viewerUrl(id: string, [lng, lat]: [number, number], photo?: stri
 	return `https://www.mapillary.com/app/?${params}`;
 }
 
+// The image taken closest to a spot, if Mapillary finds one. Its search takes
+// up to ~16 s, finds only some of the images there, and fails with a 500 for
+// boxes much larger than this ~50 m one.
+export async function findNearbyImage([lng, lat]: [number, number]): Promise<string | undefined> {
+	if (!mapillaryEnabled) return undefined;
+	try {
+		const d = 0.0005;
+		const params = new URLSearchParams({
+			access_token: TOKEN,
+			fields: "id,computed_geometry",
+			bbox: [lng - d, lat - d, lng + d, lat + d].join(","),
+			limit: "20",
+		});
+		const response = await fetch(`${API}/images?${params}`);
+		const { data = [] } = (await response.json()) as { data?: { id: string; computed_geometry?: GeoJSON.Point }[] };
+		const cos = Math.cos((lat * Math.PI) / 180);
+		const distance = ({ computed_geometry: point }: (typeof data)[number]) =>
+			point ? Math.hypot((point.coordinates[0] - lng) * cos, point.coordinates[1] - lat) : Infinity;
+		return data.sort((a, b) => distance(a) - distance(b))[0]?.id;
+	} catch {
+		return undefined;
+	}
+}
+
 // A photo the detection was made in, if Mapillary answers.
 export async function findPhoto(id: string): Promise<string | undefined> {
 	try {
