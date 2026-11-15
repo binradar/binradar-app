@@ -58,6 +58,10 @@
 	const binClass = $derived(
 		selection?.kind === "bin" ? (BIN_CLASSES[selection.properties.class as BinClass] ?? BIN_CLASSES.waste_basket) : undefined,
 	);
+	// recycling_type=container or =centre goes into the title, "Recycling
+	// container"; any other value gets a line of its own.
+	const recyclingType = $derived(selection?.kind === "bin" ? selection.properties.recycling_type : undefined);
+	const titledType = $derived(recyclingType === "container" || recyclingType === "centre");
 	// Where a bin=yes bin is, from the object it was tagged on (the tiles'
 	// list in process.lua): "highway=bus_stop" reads "At bus stop
 	// Alexanderplatz". The name in the tiles is that object's.
@@ -221,7 +225,7 @@
 		<section class="details">
 			<button class="close" onclick={() => (selection = null)} aria-label="Close">×</button>
 			{#if selection.kind === "bin" && binClass}
-				<h2><span class="dot" style:background={binClass.color}></span>{binClass.label}</h2>
+				<h2><span class="dot" style:background={binClass.color}></span>{titledType ? `${binClass.label} ${recyclingType}` : binClass.label}</h2>
 				{#if host}
 					<p>{host}</p>
 				{:else if selection.properties.name}
@@ -231,10 +235,11 @@
 				{#if selection.properties.recycling}
 					<p>Accepts: {String(selection.properties.recycling).replaceAll(";", ", ").replaceAll("_", " ")}</p>
 				{/if}
-				{#if selection.properties.recycling_type}<p>Type: {selection.properties.recycling_type}</p>{/if}
+				{#if recyclingType && !titledType}<p>Type: {recyclingType}</p>{/if}
 				{#if selection.properties.opening_hours}<p>Open: {selection.properties.opening_hours}</p>{/if}
 				{#if selection.properties.operator}<p class="muted">Operated by {selection.properties.operator}</p>{/if}
-				{#if selection.properties.precision === "low"}<p class="muted">Only tagged as bin=yes in OpenStreetMap.</p>{/if}
+				<!-- The host line says as much already. -->
+				{#if selection.properties.precision === "low" && !host}<p class="muted">Only tagged as bin=yes in OpenStreetMap.</p>{/if}
 				<p class="links">
 					<a href="https://www.openstreetmap.org/node/{selection.properties.id}" target="_blank" rel="noopener">
 						View on OpenStreetMap
