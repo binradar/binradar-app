@@ -11,7 +11,6 @@
 	import workerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?url";
 	import "maplibre-gl/dist/maplibre-gl.css";
 	import { onMount, untrack } from "svelte";
-	import type { View } from "./mapillary";
 	import { BASEMAPS, EMPTY, withOverlays, type Theme } from "./style";
 
 	// The worker is looked up next to MapLibre's own module, which bundling moves.
@@ -21,15 +20,14 @@
 		theme: Theme;
 		bins: boolean;
 		mapillary: boolean;
-		mapillaryData: GeoJSON.FeatureCollection;
 		selection: Selection | null;
 		// Height at the bottom that UI over the map covers.
 		inset: number;
 		onselect: (selection: Selection | null) => void;
-		onview: (view: View) => void;
+		onzoom: (zoom: number) => void;
 	}
 
-	let { theme, bins, mapillary, mapillaryData, selection, inset, onselect, onview }: Props = $props();
+	let { theme, bins, mapillary, selection, inset, onselect, onzoom }: Props = $props();
 
 	const VIEW_KEY = "binradar:view";
 	const LAYERS = ["bins", "mapillary"];
@@ -46,17 +44,9 @@
 	}
 
 	function emitView(m: Map) {
-		const bounds = m.getBounds();
-		const view = {
-			zoom: m.getZoom(),
-			west: bounds.getWest(),
-			south: bounds.getSouth(),
-			east: bounds.getEast(),
-			north: bounds.getNorth(),
-		};
-		onview(view);
+		onzoom(m.getZoom());
 		try {
-			localStorage.setItem(VIEW_KEY, JSON.stringify({ center: m.getCenter().toArray(), zoom: view.zoom }));
+			localStorage.setItem(VIEW_KEY, JSON.stringify({ center: m.getCenter().toArray(), zoom: m.getZoom() }));
 		} catch {}
 	}
 
@@ -101,7 +91,7 @@
 	$effect(() => {
 		map?.setStyle(BASEMAPS[theme], {
 			transformStyle: (_, next) =>
-				untrack(() => withOverlays(next, { bins, mapillary, mapillaryData, selected: selectedData() })),
+				untrack(() => withOverlays(next, { bins, mapillary, selected: selectedData() })),
 		});
 	});
 
@@ -115,10 +105,6 @@
 	$effect(() => {
 		const visibility = mapillary ? "visible" : "none";
 		if (map?.getLayer("mapillary")) map.setLayoutProperty("mapillary", "visibility", visibility);
-	});
-	$effect(() => {
-		const data = mapillaryData;
-		map?.getSource<GeoJSONSource>("mapillary")?.setData(data);
 	});
 	$effect(() => {
 		const data = selectedData();

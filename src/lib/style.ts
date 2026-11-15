@@ -1,4 +1,5 @@
 import type { ExpressionSpecification, LayerSpecification, StyleSpecification } from "maplibre-gl";
+import { MAPILLARY_TILES, MAPILLARY_ZOOM } from "./mapillary";
 
 export type Theme = "light" | "dark";
 
@@ -28,7 +29,6 @@ export const EMPTY: GeoJSON.FeatureCollection = { type: "FeatureCollection", fea
 export interface Overlays {
 	bins: boolean;
 	mapillary: boolean;
-	mapillaryData: GeoJSON.FeatureCollection;
 	selected: GeoJSON.FeatureCollection;
 }
 
@@ -43,6 +43,8 @@ export function withOverlays(style: StyleSpecification, overlays: Overlays): Sty
 			id: "mapillary",
 			type: "circle",
 			source: "mapillary",
+			"source-layer": "point",
+			filter: ["==", ["get", "value"], "object--trash-can"],
 			layout: { visibility: visibility(overlays.mapillary) },
 			paint: {
 				"circle-radius": radius,
@@ -50,7 +52,7 @@ export function withOverlays(style: StyleSpecification, overlays: Overlays): Sty
 				"circle-opacity": 0.15,
 				"circle-stroke-color": MAPILLARY_COLOR,
 				"circle-stroke-width": 2,
-				"circle-stroke-opacity": ["case", ["<", ["get", "last_seen"], STALE_BEFORE], 0.35, 1],
+				"circle-stroke-opacity": ["case", ["<", ["get", "last_seen_at"], STALE_BEFORE], 0.35, 1],
 			},
 		},
 		{
@@ -91,9 +93,12 @@ export function withOverlays(style: StyleSpecification, overlays: Overlays): Sty
 		sources: {
 			...style.sources,
 			bins: { type: "vector", tiles: [BINS_TILES], minzoom: BINS_MINZOOM, maxzoom: BINS_MINZOOM },
+			// Not fetched while its layer is hidden.
 			mapillary: {
-				type: "geojson",
-				data: overlays.mapillaryData,
+				type: "vector",
+				tiles: [MAPILLARY_TILES],
+				minzoom: MAPILLARY_ZOOM,
+				maxzoom: MAPILLARY_ZOOM,
 				attribution: '<a href="https://www.mapillary.com" target="_blank">© Mapillary</a>',
 			},
 			selected: { type: "geojson", data: overlays.selected },
