@@ -20,6 +20,7 @@
 	import workerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?url";
 	import "maplibre-gl/dist/maplibre-gl.css";
 	import { onMount, untrack } from "svelte";
+	import { addHeadingBeam } from "./heading";
 	import { BASEMAPS, EMPTY, withOverlays, type Theme } from "./style";
 
 	// The worker is looked up next to MapLibre's own module, which bundling moves.
@@ -67,7 +68,9 @@
 
 		const m = new Map({ container, ...start, attributionControl: { compact: true } });
 		m.addControl(new NavigationControl());
-		m.addControl(new GeolocateControl({ positionOptions: { enableHighAccuracy: true }, trackUserLocation: true }));
+		const geolocate = new GeolocateControl({ positionOptions: { enableHighAccuracy: true }, trackUserLocation: true });
+		m.addControl(geolocate);
+		const unwatchHeading = addHeadingBeam(m, geolocate);
 
 		m.on("load", () => emitView(m));
 		m.on("moveend", () => emitView(m));
@@ -134,7 +137,10 @@
 		}
 
 		map = m;
-		return () => m.remove();
+		return () => {
+			unwatchHeading();
+			m.remove();
+		};
 	});
 
 	// Swaps the basemap whenever the theme changes, adding our overlays back in
@@ -181,6 +187,23 @@
 		-webkit-touch-callout: none;
 		-webkit-user-select: none;
 		user-select: none;
+	}
+	/* The beam from heading.ts, a fading wedge in the dot's blue. Inside the
+	   dot, under its white ring; over its fill, in the same colour. */
+	.map :global(.heading-beam) {
+		position: absolute;
+		z-index: -1;
+		top: 50%;
+		left: 50%;
+		width: 90px;
+		height: 90px;
+		margin: -45px;
+		background: conic-gradient(from -30deg, rgb(29 161 242 / 0.6) 60deg, transparent 0);
+		mask-image: radial-gradient(closest-side, #000, transparent);
+		pointer-events: none;
+	}
+	.map :global(.maplibregl-user-location-dot-stale .heading-beam) {
+		display: none;
 	}
 	.map :global(.maplibregl-ctrl-bottom-left),
 	.map :global(.maplibregl-ctrl-bottom-right) {
