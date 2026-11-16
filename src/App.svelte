@@ -125,10 +125,11 @@
 		if (z < BINS_MINZOOM && selection?.kind !== "place") selection = null;
 	}
 
-	// Phones get a sheet over the map that rests showing its top part (title,
-	// hint, selection) and is dragged or tapped open for the settings; wider
-	// screens a sidebar. The sheet is as tall as the screen and moves by its
-	// offset: how much of it is pushed below the bottom edge.
+	// Phones get a sheet over the map that rests showing its top part (title
+	// and hint, or a selection) and is dragged or tapped open for the
+	// settings; wider screens a sidebar. A selection is all the sheet shows,
+	// with nothing to open. The sheet is as tall as the screen and moves by
+	// its offset: how much of it is pushed below the bottom edge.
 	const wide = new MediaQuery("min-width: 768px");
 	let sheet = $state<HTMLElement>();
 	let more = $state<HTMLElement>();
@@ -143,7 +144,7 @@
 	const fills = $derived(content > sheetHeight * 0.9);
 	const scrolls = $derived(content > sheetHeight);
 	const restOffset = $derived(sheetHeight - peek);
-	const openOffset = $derived(fills ? 0 : sheetHeight - content);
+	const openOffset = $derived(selection ? restOffset : fills ? 0 : sheetHeight - content);
 	let dragOffset = $state<number | null>(null);
 	const offset = $derived(dragOffset ?? (expanded ? openOffset : restOffset));
 
@@ -195,7 +196,7 @@
 			// A flick goes where it points; otherwise the sheet settles at the
 			// closer end.
 			const velocity = e.timeStamp - drag.time < 100 ? drag.velocity : 0;
-			expanded = Math.abs(velocity) > 0.4 ? velocity < 0 : drag.raw < (openOffset + restOffset) / 2;
+			expanded = !selection && (Math.abs(velocity) > 0.4 ? velocity < 0 : drag.raw < (openOffset + restOffset) / 2);
 			dragged = true;
 		}
 		drag = undefined;
@@ -210,30 +211,24 @@
 	}
 </script>
 
-<!-- Collapsed, one open at a time; open stays as the user left it from one
-     selection to the next unless `open` itself changes. -->
-{#snippet linkGroup(title: string, links: { label: string; url: string }[], open = false)}
-	<details class="group" name="links" {open}>
-		<summary>{title}</summary>
-		<p class="links">
-			{#each links as { label, url } (label)}
-				<!-- A geo: link in a new tab would leave an empty one behind. -->
-				<a href={url} target={url.startsWith("http") ? "_blank" : undefined} rel="noopener">{label}</a>
-			{/each}
-		</p>
-	</details>
+{#snippet linkGroup(title: string, links: { label: string; url: string }[])}
+	<p class="group muted">{title}</p>
+	<p class="links">
+		{#each links as { label, url } (label)}
+			<!-- A geo: link in a new tab would leave an empty one behind. -->
+			<a href={url} target={url.startsWith("http") ? "_blank" : undefined} rel="noopener">{label}</a>
+		{/each}
+	</p>
 {/snippet}
 
+<!-- A selection takes the whole panel; the rest comes back once it is closed. -->
 {#snippet top()}
 	{#if !selection}
 		<header><h1>BinRadar</h1></header>
-	{/if}
-
-	{#if zoom !== undefined && zoom < BINS_MINZOOM}
-		<p class="hint">Zoom in to see bins.</p>
-	{/if}
-
-	{#if selection}
+		{#if zoom !== undefined && zoom < BINS_MINZOOM}
+			<p class="hint">Zoom in to see bins.</p>
+		{/if}
+	{:else}
 		<section class="details">
 			<button class="close" onclick={() => (selection = null)} aria-label="Close">×</button>
 			{#if selection.kind === "bin" && binClass}
@@ -267,11 +262,8 @@
 				<h2>Selected spot</h2>
 				<p class="muted">{selection.lngLat[1].toFixed(5)}, {selection.lngLat[0].toFixed(5)}</p>
 			{/if}
-			<div class="groups">
-				{@render linkGroup("Directions", directions)}
-				<!-- A spot is picked to look at it. -->
-				{@render linkGroup("Street-level photos", streetLevel, selection.kind === "place")}
-			</div>
+			{@render linkGroup("Directions", directions)}
+			{@render linkGroup("Street-level photos", streetLevel)}
 		</section>
 	{/if}
 {/snippet}
@@ -330,7 +322,9 @@
 	{#if wide.current}
 		<aside class="sidebar">
 			{@render top()}
-			<div class="settings">{@render settings()}</div>
+			{#if !selection}
+				<div class="settings">{@render settings()}</div>
+			{/if}
 		</aside>
 	{:else}
 		<aside
@@ -347,15 +341,19 @@
 			onpointercancel={release}
 			onclickcapture={dropClick}
 		>
-			<div class="peek" bind:offsetHeight={peekHeight}>
-				<button class="handle" onclick={() => (expanded = !expanded)} aria-expanded={expanded} aria-label="Toggle settings">
-					<span></span>
-				</button>
+			<div class="peek" class:selected={selection} bind:offsetHeight={peekHeight}>
+				{#if !selection}
+					<button class="handle" onclick={() => (expanded = !expanded)} aria-expanded={expanded} aria-label="Toggle settings">
+						<span></span>
+					</button>
+				{/if}
 				{@render top()}
 			</div>
-			<div class="more" class:scrolls bind:this={more} inert={!expanded}>
-				<div class="settings" bind:offsetHeight={settingsHeight}>{@render settings()}</div>
-			</div>
+			{#if !selection}
+				<div class="more" class:scrolls bind:this={more} inert={!expanded}>
+					<div class="settings" bind:offsetHeight={settingsHeight}>{@render settings()}</div>
+				</div>
+			{/if}
 		</aside>
 	{/if}
 
@@ -428,6 +426,10 @@
 		-webkit-user-select: none;
 		user-select: none;
 	}
+	/* No handle above a selection. */
+	.peek.selected {
+		padding-top: 16px;
+	}
 	.more {
 		transition: opacity 0.2s;
 	}
@@ -486,26 +488,23 @@
 		margin: 4px 0;
 	}
 	.hint {
-		margin: 0;
+		margin-top: 12px;
 		padding: 8px 12px;
 		border-radius: 8px;
 		background: var(--accent-soft);
 	}
-	/* The details take the header's place at the top. */
+	/* The details take the header's place, and have the panel to themselves. */
 	.details {
 		margin-top: 0;
-		padding: 12px;
-		border: 1px solid var(--border);
-		border-radius: 10px;
 	}
-	header + .hint,
-	.hint + .details {
-		margin-top: 12px;
+	.details h2 {
+		padding-right: 32px;
+		font-size: 1.15rem;
 	}
 	.close {
 		position: absolute;
-		top: 4px;
-		right: 8px;
+		top: -6px;
+		right: -8px;
 		padding: 4px 8px;
 		background: none;
 		border: 0;
@@ -517,20 +516,15 @@
 		display: flex;
 		flex-wrap: wrap;
 		gap: 4px 16px;
-		margin: 0 0 6px 14px;
+		margin-top: 2px;
+	}
+	.group {
+		margin-top: 12px;
+		font-size: 0.85rem;
 	}
 	/* Wraps after the operator as a whole. */
 	.details .muted a {
 		white-space: nowrap;
-	}
-	.groups {
-		margin-top: 8px;
-	}
-	summary {
-		padding: 4px 0;
-		color: var(--muted);
-		font-size: 0.9rem;
-		cursor: pointer;
 	}
 	.note {
 		margin-top: 8px;
