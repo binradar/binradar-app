@@ -62,6 +62,14 @@
 	// container"; any other value gets a line of its own.
 	const recyclingType = $derived(selection?.kind === "bin" ? selection.properties.recycling_type : undefined);
 	const titledType = $derived(recyclingType === "container" || recyclingType === "centre");
+	// What goes in, from waste=* and recycling:*=yes alike, as words:
+	// "trash;dog_excrement" reads "trash, dog excrement".
+	const accepts = $derived.by(() => {
+		if (selection?.kind !== "bin") return undefined;
+		const { waste, recycling } = selection.properties;
+		const values = [waste, recycling].filter(Boolean).flatMap((value) => String(value).split(";"));
+		return [...new Set(values.map((value) => value.trim().replaceAll("_", " ")))].join(", ");
+	});
 	// Where a bin=yes bin is, from the object it was tagged on (the tiles'
 	// list in process.lua): "highway=bus_stop" reads "At bus stop
 	// Alexanderplatz". The name in the tiles is that object's.
@@ -202,20 +210,24 @@
 	}
 </script>
 
-{#snippet linkGroup(title: string, links: { label: string; url: string }[])}
-	<p class="group muted">{title}</p>
-	<p class="links">
-		{#each links as { label, url } (label)}
-			<a href={url} target="_blank" rel="noopener">{label}</a>
-		{/each}
-	</p>
+<!-- Collapsed, one open at a time; open stays as the user left it from one
+     selection to the next unless `open` itself changes. -->
+{#snippet linkGroup(title: string, links: { label: string; url: string }[], open = false)}
+	<details class="group" name="links" {open}>
+		<summary>{title}</summary>
+		<p class="links">
+			{#each links as { label, url } (label)}
+				<!-- A geo: link in a new tab would leave an empty one behind. -->
+				<a href={url} target={url.startsWith("http") ? "_blank" : undefined} rel="noopener">{label}</a>
+			{/each}
+		</p>
+	</details>
 {/snippet}
 
 {#snippet top()}
-	<header>
-		<h1>BinRadar</h1>
-		<p>Find the nearest public waste bin.</p>
-	</header>
+	{#if !selection}
+		<header><h1>BinRadar</h1></header>
+	{/if}
 
 	{#if zoom !== undefined && zoom < BINS_MINZOOM}
 		<p class="hint">Zoom in to see bins.</p>
@@ -231,16 +243,13 @@
 				{:else if selection.properties.name}
 					<p>{selection.properties.name}</p>
 				{/if}
-				{#if selection.properties.waste}<p>Accepts: {String(selection.properties.waste).replaceAll(";", ", ")}</p>{/if}
-				{#if selection.properties.recycling}
-					<p>Accepts: {String(selection.properties.recycling).replaceAll(";", ", ").replaceAll("_", " ")}</p>
-				{/if}
+				{#if accepts}<p>Accepts {accepts}</p>{/if}
 				{#if recyclingType && !titledType}<p>Type: {recyclingType}</p>{/if}
 				{#if selection.properties.opening_hours}<p>Open: {selection.properties.opening_hours}</p>{/if}
-				{#if selection.properties.operator}<p class="muted">Operated by {selection.properties.operator}</p>{/if}
 				<!-- The host line says as much already. -->
 				{#if selection.properties.precision === "low" && !host}<p class="muted">Only tagged as bin=yes in OpenStreetMap.</p>{/if}
-				<p class="links">
+				<p class="muted">
+					{#if selection.properties.operator}Operated by {selection.properties.operator} ·{/if}
 					<a href="https://www.openstreetmap.org/node/{selection.properties.id}" target="_blank" rel="noopener">
 						View on OpenStreetMap
 					</a>
@@ -248,16 +257,21 @@
 			{:else if selection.kind === "mapillary"}
 				<h2><span class="dot ring" style:border-color={MAPILLARY_COLOR}></span>Trash can on Mapillary</h2>
 				<p>Detected in street-level photos, not confirmed in OpenStreetMap.</p>
-				<p class:stale={Number(selection.properties.last_seen_at) < STALE_BEFORE}>
-					Last seen {formatDate(selection.properties.last_seen_at)}
+				<p class="muted">
+					<span class:stale={Number(selection.properties.last_seen_at) < STALE_BEFORE}>
+						Last seen {formatDate(selection.properties.last_seen_at)}
+					</span>
+					· <a href={viewer} target="_blank" rel="noopener">View on Mapillary</a>
 				</p>
-				<p class="links"><a href={viewer} target="_blank" rel="noopener">View on Mapillary</a></p>
 			{:else}
 				<h2>Selected spot</h2>
 				<p class="muted">{selection.lngLat[1].toFixed(5)}, {selection.lngLat[0].toFixed(5)}</p>
 			{/if}
-			{@render linkGroup("Directions", directions)}
-			{@render linkGroup("Street-level photos", streetLevel)}
+			<div class="groups">
+				{@render linkGroup("Directions", directions)}
+				<!-- A spot is picked to look at it. -->
+				{@render linkGroup("Street-level photos", streetLevel, selection.kind === "place")}
+			</div>
 		</section>
 	{/if}
 {/snippet}
@@ -266,30 +280,26 @@
 	<section>
 		<h2>Layers</h2>
 		<label><input type="checkbox" bind:checked={showBins} /> Bins from OpenStreetMap</label>
-		<label class:disabled={!mapillaryEnabled}>
-			<input type="checkbox" bind:checked={showMapillary} disabled={!mapillaryEnabled} />
-			Trash cans detected by Mapillary
-		</label>
-		{#if !mapillaryEnabled}
-			<p class="muted">No Mapillary token configured.</p>
-		{:else if showMapillary}
-			<p class="muted">Loads several MB per area in city centres.</p>
-		{/if}
-	</section>
-
-	<section>
-		<h2>Legend</h2>
 		<ul class="legend">
 			{#each Object.values(BIN_CLASSES) as { label, color } (label)}
 				<li><span class="dot" style:background={color}></span>{label}</li>
 			{/each}
-			<li><span class="dot ring" style:border-color={MAPILLARY_COLOR}></span>Mapillary detection</li>
 		</ul>
-	</section>
-
-	<section>
-		<h2>Street-level photos</h2>
-		<p class="muted">Right-click or long-press the map to see street-level photos of any spot.</p>
+		<label class:disabled={!mapillaryEnabled}>
+			<input type="checkbox" bind:checked={showMapillary} disabled={!mapillaryEnabled} />
+			Trash cans detected by Mapillary
+		</label>
+		<ul class="legend">
+			<li>
+				<span class="dot ring" style:border-color={MAPILLARY_COLOR}></span>Faded if not seen since {new Date(STALE_BEFORE).getUTCFullYear()}
+			</li>
+		</ul>
+		{#if !mapillaryEnabled}
+			<p class="note muted">No Mapillary token configured.</p>
+		{:else if showMapillary}
+			<p class="note muted">Loads several MB per area in city centres.</p>
+		{/if}
+		<p class="note muted">Right-click or long-press the map to see street-level photos of any spot.</p>
 	</section>
 
 	<section>
@@ -461,10 +471,6 @@
 		margin: 0;
 		font-size: 1.25rem;
 	}
-	header p {
-		margin: 2px 0 0;
-		color: var(--muted);
-	}
 	section {
 		position: relative;
 		margin-top: 16px;
@@ -480,15 +486,21 @@
 		margin: 4px 0;
 	}
 	.hint {
-		margin-top: 12px;
+		margin: 0;
 		padding: 8px 12px;
 		border-radius: 8px;
 		background: var(--accent-soft);
 	}
+	/* The details take the header's place at the top. */
 	.details {
+		margin-top: 0;
 		padding: 12px;
 		border: 1px solid var(--border);
 		border-radius: 10px;
+	}
+	header + .hint,
+	.hint + .details {
+		margin-top: 12px;
 	}
 	.close {
 		position: absolute;
@@ -505,14 +517,24 @@
 		display: flex;
 		flex-wrap: wrap;
 		gap: 4px 16px;
+		margin: 0 0 6px 14px;
+	}
+	/* Wraps after the operator as a whole. */
+	.details .muted a {
+		white-space: nowrap;
+	}
+	.groups {
 		margin-top: 8px;
 	}
-	.group {
-		margin-top: 12px;
-		font-size: 0.85rem;
+	summary {
+		padding: 4px 0;
+		color: var(--muted);
+		font-size: 0.9rem;
+		cursor: pointer;
 	}
-	.group + .links {
-		margin-top: 2px;
+	.note {
+		margin-top: 8px;
+		font-size: 0.9rem;
 	}
 	.muted,
 	.disabled {
@@ -527,16 +549,28 @@
 		gap: 8px;
 		padding: 4px 0;
 	}
-	.legend {
+	label input {
+		flex: none;
+		width: 16px;
+		height: 16px;
 		margin: 0;
-		padding: 0;
+		accent-color: var(--accent);
+	}
+	/* Under its layer's checkbox, lined up with the label. */
+	.legend {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 2px 14px;
+		margin: 0 0 6px;
+		padding: 0 0 0 24px;
 		list-style: none;
+		color: var(--muted);
+		font-size: 0.9rem;
 	}
 	.legend li {
 		display: flex;
 		align-items: center;
-		gap: 8px;
-		padding: 2px 0;
+		gap: 6px;
 	}
 	.dot {
 		flex: none;
