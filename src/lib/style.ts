@@ -69,8 +69,6 @@ export function withOverlays(style: StyleSpecification, overlays: Overlays): Sty
 					"waste_disposal", BIN_CLASSES.waste_disposal.color,
 					BIN_CLASSES.waste_basket.color,
 				],
-				// bin=yes proxies are a weaker signal than a proper amenity tag.
-				"circle-opacity": ["case", ["==", ["get", "precision"], "low"], 0.5, 1],
 				"circle-stroke-color": "#ffffff",
 				"circle-stroke-width": 1.5,
 			},

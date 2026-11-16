@@ -66,7 +66,7 @@
 		} catch {}
 
 		const m = new Map({ container, ...start, attributionControl: { compact: true } });
-		m.addControl(new NavigationControl({ showCompass: false }));
+		m.addControl(new NavigationControl());
 		m.addControl(new GeolocateControl({ positionOptions: { enableHighAccuracy: true }, trackUserLocation: true }));
 
 		m.on("load", () => emitView(m));

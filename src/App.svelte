@@ -128,8 +128,9 @@
 	// Phones get a sheet over the map that rests showing its top part (title
 	// and hint, or a selection) and is dragged or tapped open for the
 	// settings; wider screens a sidebar. A selection is all the sheet shows,
-	// with nothing to open. The sheet is as tall as the screen and moves by
-	// its offset: how much of it is pushed below the bottom edge.
+	// with nothing to open, and is swiped down to dismiss it. The sheet is as
+	// tall as the screen and moves by its offset: how much of it is pushed
+	// below the bottom edge.
 	const wide = new MediaQuery("min-width: 768px");
 	let sheet = $state<HTMLElement>();
 	let more = $state<HTMLElement>();
@@ -147,16 +148,22 @@
 	const openOffset = $derived(selection ? restOffset : fills ? 0 : sheetHeight - content);
 	let dragOffset = $state<number | null>(null);
 	const offset = $derived(dragOffset ?? (expanded ? openOffset : restOffset));
+	// The settings fade in as the sheet opens, from a sixth of the way to
+	// two thirds: right below the resting sheet, they would show the moment
+	// it is touched.
+	const openness = $derived(openOffset < restOffset ? (restOffset - offset) / (restOffset - openOffset) : 0);
+	const settingsOpacity = $derived(Math.min(1, Math.max(0, (openness - 1 / 6) * 2)));
 
 	$effect(() => {
 		if (!expanded) more?.scrollTo({ top: 0, behavior: "smooth" });
 	});
 
-	// Past either end the sheet still gives, less the further it is pulled.
+	// Past either end the sheet still gives, less the further it is pulled. A
+	// selection follows the finger down, on its way out.
 	const rubberBand = (distance: number, limit = 120) => limit * (1 - 1 / ((distance * 0.55) / limit + 1));
 	function resist(raw: number) {
 		if (raw < openOffset) return openOffset - rubberBand(openOffset - raw);
-		if (raw > restOffset) return restOffset + rubberBand(raw - restOffset);
+		if (raw > restOffset && !selection) return restOffset + rubberBand(raw - restOffset);
 		return raw;
 	}
 
@@ -194,9 +201,14 @@
 		if (e.pointerId !== drag?.id) return;
 		if (drag.moved) {
 			// A flick goes where it points; otherwise the sheet settles at the
-			// closer end.
+			// closer end. A selection's ends are resting and gone.
 			const velocity = e.timeStamp - drag.time < 100 ? drag.velocity : 0;
-			expanded = !selection && (Math.abs(velocity) > 0.4 ? velocity < 0 : drag.raw < (openOffset + restOffset) / 2);
+			const flick = Math.abs(velocity) > 0.4;
+			if (selection) {
+				if (flick ? velocity > 0 : drag.raw > (restOffset + sheetHeight) / 2) select(null);
+			} else {
+				expanded = flick ? velocity < 0 : drag.raw < (openOffset + restOffset) / 2;
+			}
 			dragged = true;
 		}
 		drag = undefined;
@@ -350,7 +362,7 @@
 				{@render top()}
 			</div>
 			{#if !selection}
-				<div class="more" class:scrolls bind:this={more} inert={!expanded}>
+				<div class="more" class:scrolls style:opacity={settingsOpacity} bind:this={more} inert={!expanded}>
 					<div class="settings" bind:offsetHeight={settingsHeight}>{@render settings()}</div>
 				</div>
 			{/if}
@@ -433,8 +445,8 @@
 	.more {
 		transition: opacity 0.2s;
 	}
-	.sheet:not(.expanded, .dragging) .more {
-		opacity: 0;
+	.sheet.dragging .more {
+		transition: none;
 	}
 	.more.scrolls {
 		flex: 1;
